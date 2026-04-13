@@ -4,3 +4,9 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Private strategy development
+strategies/
+
+# Private plans and docs
+docs/superpowers/
