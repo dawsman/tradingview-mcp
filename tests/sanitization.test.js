@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, drawPosition } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -324,5 +324,69 @@ describe('path traversal prevention', () => {
   it('batch.js strips path separators from filename', () => {
     const source = readFileSync(new URL('../src/core/batch.js', import.meta.url), 'utf8');
     assert.ok(source.includes(".replace(/[\\/\\\\]/g, '_')"));
+  });
+});
+
+// ── drawing.js — drawPosition validation ────────────────────────────────
+
+describe('drawing.js — drawPosition validation', () => {
+  it('rejects long with stop_loss >= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 100, take_profit: 110, _deps }),
+      /long position: stop_loss must be below entry_price/,
+    );
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 105, take_profit: 110, _deps }),
+      /long position: stop_loss must be below entry_price/,
+    );
+  });
+
+  it('rejects long with take_profit <= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: 90, take_profit: 100, _deps }),
+      /long position: take_profit must be above entry_price/,
+    );
+  });
+
+  it('rejects short with stop_loss <= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 100, take_profit: 90, _deps }),
+      /short position: stop_loss must be above entry_price/,
+    );
+  });
+
+  it('rejects short with take_profit >= entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'short', entry_price: 100, stop_loss: 110, take_profit: 100, _deps }),
+      /short position: take_profit must be below entry_price/,
+    );
+  });
+
+  it('rejects invalid direction', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'up', entry_price: 100, stop_loss: 90, take_profit: 110, _deps }),
+      /direction must be "long" or "short"/,
+    );
+  });
+
+  it('rejects NaN entry_price', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: NaN, stop_loss: 90, take_profit: 110, _deps }),
+      /entry_price must be a finite number/,
+    );
+  });
+
+  it('rejects Infinity stop_loss', async () => {
+    const { _deps } = mockDeps();
+    await assert.rejects(
+      () => drawPosition({ direction: 'long', entry_price: 100, stop_loss: Infinity, take_profit: 110, _deps }),
+      /stop_loss must be a finite number/,
+    );
   });
 });
