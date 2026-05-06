@@ -189,6 +189,7 @@ export async function scrollToDate({ date, _deps } = {}) {
 
   let strategy = 'unknown';
   let dialogOk = false;
+  let from = null, to = null;
   try {
     const c = await getClient();
     // Press Alt+G to open TV's "Go to date" dialog.
@@ -277,8 +278,8 @@ export async function scrollToDate({ date, _deps } = {}) {
     else { const mins = parseInt(res, 10); if (!isNaN(mins)) secsPerBar = mins * 60; }
 
     const halfWindow = 25 * secsPerBar;
-    const from = timestamp - halfWindow;
-    const to = timestamp + halfWindow;
+    from = timestamp - halfWindow;
+    to = timestamp + halfWindow;
 
     await evaluate(`
       (function() {
@@ -304,7 +305,7 @@ export async function scrollToDate({ date, _deps } = {}) {
 
   // Brief settle so post-load redraws complete before the caller screenshots.
   await new Promise(r => setTimeout(r, 600));
-  return { success: true, date, centered_on: timestamp, resolution, strategy };
+  return { success: true, date, centered_on: timestamp, resolution, strategy, window: dialogOk ? null : { from, to } };
 }
 
 export async function symbolInfo({ _deps } = {}) {

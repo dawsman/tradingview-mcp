@@ -20,6 +20,9 @@ export async function captureScreenshot({ region, filename, method, output_dir, 
     filePath = join(targetDir, `${fname}.png`);
   }
 
+  // Note: method === 'api' returns the screenshot inline without writing to disk.
+  // The `path` and `output_dir` parameters are ignored on this code path; only
+  // the default CDP capture (below) writes a file.
   if (method === 'api') {
     try {
       const colPath = await getChartCollection();
