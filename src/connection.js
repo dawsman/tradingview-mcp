@@ -2,7 +2,7 @@ import CDP from 'chrome-remote-interface';
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = process.env.CDP_HOST || 'localhost';
+const CDP_HOST = process.env.CDP_HOST || '127.0.0.1';
 const CDP_PORT = parseInt(process.env.CDP_PORT || '9222', 10);
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
@@ -72,10 +72,11 @@ export async function connect() {
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
-      // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      // Note: Runtime.enable(), Page.enable(), DOM.enable() are skipped.
+      // TradingView Electron 38 doesn't respond to CDP enable() calls, but the
+      // underlying methods (Runtime.evaluate, Page.captureScreenshot, etc.) work
+      // fine without explicit enabling. Verified via raw WebSocket testing
+      // (upstream #108).
 
       return client;
     } catch (err) {
@@ -91,9 +92,13 @@ async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
   // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
+  const chartTarget = targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url));
+  if (chartTarget) return chartTarget;
+  // Fallback: any tradingview.com page (symbol page etc.)
+  const webTarget = targets.find(t => t.type === 'page' && /tradingview\.com/i.test(t.url));
+  if (webTarget) return webTarget;
+  // Last resort: TradingView Desktop's internal app webview (file:// /app.asar/app/window/)
+  return targets.find(t => t.type === 'page' && /\/app\.asar\/app\/window\/index\.html/i.test(t.url)) || null;
 }
 
 export async function getTargetInfo() {
