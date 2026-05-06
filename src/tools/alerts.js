@@ -34,8 +34,8 @@ export function registerAlertTools(server) {
     currency: z.string().optional().describe('currency-id for the symbol marker (e.g. "JPY", "USD"). Defaults to active chart.'),
     resolution: z.string().optional().describe('Timeframe (e.g. "60", "240", "D"). Defaults to active chart.'),
     message: z.string().optional().describe('Alert payload. Supports {{ticker}}, {{close}}, and other TV placeholders. Sent verbatim to web_hook.'),
-    web_hook: z.string().optional().describe('Webhook URL TV will POST the message to on fire. Omit for no webhook.'),
-    frequency: z.string().optional().describe('"on_bar_close" (default), "once_per_bar", or "all".'),
+    web_hook: z.string().url().optional().describe('Webhook URL TV will POST the message to on fire. Omit for no webhook.'),
+    frequency: z.enum(['on_bar_close', 'once_per_bar', 'all']).optional().describe('"on_bar_close" (default), "once_per_bar", or "all".'),
     expiration_days: z.coerce.number().int().min(1).max(60).optional().describe('Days until auto-expiration (default 30, capped at 60).'),
     active: z.coerce.boolean().optional().describe('Whether the alert starts active (default true).'),
   }, async (args) => {
