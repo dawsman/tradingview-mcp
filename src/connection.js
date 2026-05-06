@@ -97,7 +97,8 @@ async function findChartTarget() {
   // Fallback: any tradingview.com page (symbol page etc.)
   const webTarget = targets.find(t => t.type === 'page' && /tradingview\.com/i.test(t.url));
   if (webTarget) return webTarget;
-  // Last resort: TradingView Desktop's internal app webview (file:// /app.asar/app/window/)
+  // Last resort: TradingView Desktop's internal renderer page (file:// /app.asar/app/window/)
+  // Reported by CDP as type='page' in Electron 38, not type='webview'.
   return targets.find(t => t.type === 'page' && /\/app\.asar\/app\/window\/index\.html/i.test(t.url)) || null;
 }
 
@@ -143,9 +144,11 @@ export async function connectToTarget(targetId) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
+      // Note: Runtime.enable(), Page.enable(), DOM.enable() are skipped.
+      // TradingView Electron 38 doesn't respond to CDP enable() calls, but the
+      // underlying methods (Runtime.evaluate, Page.captureScreenshot, etc.) work
+      // fine without explicit enabling. Same treatment as connect() above
+      // (upstream #108).
       targetInfo = { id: targetId };
       return client;
     } catch (err) {
