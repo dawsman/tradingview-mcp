@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { logToolCall, logToolResult, logError } from './logger.js';
 import { registerHealthTools } from './tools/health.js';
 import { registerChartTools } from './tools/chart.js';
 import { registerPineTools } from './tools/pine.js';
@@ -69,6 +70,26 @@ CONTEXT MANAGEMENT:
 - Call chart_get_state ONCE at start, reuse entity IDs`,
   }
 );
+
+// Wrap server.tool to log every call/result automatically
+const _origTool = server.tool.bind(server);
+server.tool = function (name, ...rest) {
+  // server.tool(name, desc, schema, handler) or server.tool(name, desc, handler)
+  const handler = rest.pop();
+  const wrappedHandler = async (args, extra) => {
+    const start = Date.now();
+    logToolCall(name, args);
+    try {
+      const result = await handler(args, extra);
+      logToolResult(name, result, Date.now() - start);
+      return result;
+    } catch (err) {
+      logError(name, err, Date.now() - start);
+      throw err;
+    }
+  };
+  return _origTool(name, ...rest, wrappedHandler);
+};
 
 // Register all tool groups
 registerHealthTools(server);
