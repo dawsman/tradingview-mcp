@@ -6,8 +6,31 @@
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
+//
+// Resolves TV's Pine Editor Monaco instance. Two paths:
+//   1. FAST PATH — `window.monaco.editor.getEditors()`. Robust under
+//      transitional fiber states (mid-render, post-`setValue`, post-`pine_new`).
+//   2. FALLBACK — React fiber walk. Used when `window.monaco` is not exposed
+//      (older TV builds).
+// Callers only read `.editor`, so both paths are structurally compatible.
+// (upstream #97 partial — fast path only; ensurePineEditorOpen left as-is)
 const FIND_MONACO = `
   (function findMonacoEditor() {
+    // Fast path: direct Monaco API
+    try {
+      if (window.monaco && window.monaco.editor && typeof window.monaco.editor.getEditors === 'function') {
+        var allEditors = window.monaco.editor.getEditors();
+        for (var j = 0; j < allEditors.length; j++) {
+          var ed = allEditors[j];
+          var node = typeof ed.getContainerDomNode === 'function' ? ed.getContainerDomNode() : null;
+          if (node && node.closest && node.closest('.pine-editor-monaco')) {
+            return { editor: ed, env: { editor: window.monaco.editor } };
+          }
+        }
+      }
+    } catch (e) { /* fall through to fiber walk */ }
+
+    // Fallback: React fiber walk
     var container = document.querySelector('.monaco-editor.pine-editor-monaco');
     if (!container) return null;
     var el = container;
