@@ -5,25 +5,41 @@ import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 export async function click({ by, value }) {
   const escaped = JSON.stringify(value);
-  const result = await evaluate(`
+  const probe = `
     (function() {
       var by = ${JSON.stringify(by)};
       var value = ${escaped};
+      function norm(s) { return (s || '').toString().trim().toLowerCase().replace(/[\\u2026\\.]+$/, ''); }
+      var target = norm(value);
       var el = null;
-      if (by === 'aria-label') el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
-      else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
-      else if (by === 'text') {
+      if (by === 'aria-label') {
+        el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
+        if (!el) {
+          var labelled = document.querySelectorAll('[aria-label]');
+          for (var i = 0; i < labelled.length; i++) {
+            if (norm(labelled[i].getAttribute('aria-label')) === target) { el = labelled[i]; break; }
+          }
+        }
+      } else if (by === 'data-name') {
+        el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
+      } else if (by === 'text') {
         var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"]');
         for (var i = 0; i < candidates.length; i++) {
-          var text = candidates[i].textContent.trim();
-          if (text === value || text.toLowerCase() === value.toLowerCase()) { el = candidates[i]; break; }
+          if (norm(candidates[i].textContent) === target) { el = candidates[i]; break; }
         }
-      } else if (by === 'class-contains') el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+      } else if (by === 'class-contains') {
+        el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+      }
       if (!el) return { found: false };
       el.click();
       return { found: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().substring(0, 80), aria_label: el.getAttribute('aria-label') || null, data_name: el.getAttribute('data-name') || null };
     })()
-  `);
+  `;
+  let result = await evaluate(probe);
+  if (!result || !result.found) {
+    await new Promise(r => setTimeout(r, 300));
+    result = await evaluate(probe);
+  }
   if (!result || !result.found) throw new Error('No matching element found for ' + by + '="' + value + '"');
   return { success: true, clicked: result };
 }
@@ -49,7 +65,15 @@ export async function openPanel({ panel, action }) {
           else { if (typeof bwb.showWidget === 'function') bwb.showWidget(widgetName); }
           performed = 'opened';
         } else if (action === 'close' || (action === 'toggle' && isOpen)) {
-          if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
+          // Newer TV: bwb.close() minimizes the bar. Older TV: bwb.hideWidget(name).
+          // Final fallback: click the panel's close button in the DOM.
+          if (typeof bwb.close === 'function') bwb.close();
+          else if (typeof bwb.hideWidget === 'function') bwb.hideWidget(widgetName);
+          else {
+            var closeBtn = document.querySelector('[class*="layout__area--bottom"] [aria-label*="Close" i]')
+              || document.querySelector('[class*="layout__area--bottom"] [data-name*="close"]');
+            if (closeBtn) closeBtn.click();
+          }
           performed = 'closed';
         }
         return { was_open: isOpen, performed: performed };
@@ -114,7 +138,7 @@ export async function layoutList() {
       } catch(e) { resolve({layouts: [], source: 'internal_api', error: e.message}); }
     })
   `);
-  return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
+  return { success: !layouts?.error, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
 }
 
 export async function layoutSwitch({ name }) {

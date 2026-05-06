@@ -37,9 +37,10 @@ const FIND_MONACO = `
 
 /**
  * Opens the Pine Editor panel and waits for Monaco to become available.
- * Returns true if editor is accessible, false on timeout.
+ * Returns true on success; throws a diagnostic error on timeout (identifies
+ * which stage failed: panel-open vs. Monaco-DOM vs. React-fiber probe).
  */
-export async function ensurePineEditorOpen() {
+export async function ensurePineEditorOpen({ timeoutMs = 20000, pollMs = 250 } = {}) {
   const already = await evaluate(`
     (function() {
       var m = ${FIND_MONACO};
@@ -48,29 +49,60 @@ export async function ensurePineEditorOpen() {
   `);
   if (already) return true;
 
-  await evaluate(`
+  const activate = () => evaluate(`
     (function() {
+      function unwrap(v) { try { return (v && typeof v.value === 'function') ? v.value() : v; } catch(e) { return null; } }
       var bwb = window.TradingView && window.TradingView.bottomWidgetBar;
-      if (!bwb) return;
-      if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
-      else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
-    })()
-  `);
-
-  await evaluate(`
-    (function() {
+      if (bwb) {
+        // Step 1: set pine-editor as the active widget.
+        if (typeof bwb.activateScriptEditorTab === 'function') bwb.activateScriptEditorTab();
+        else if (typeof bwb.showWidget === 'function') bwb.showWidget('pine-editor');
+        // Step 2: if the bar is minimized (previous close() call), restore to normal.
+        try {
+          if (typeof bwb.mode === 'function' && unwrap(bwb.mode()) === 'minimized'
+              && typeof bwb.setMode === 'function') bwb.setMode('normal');
+        } catch(e) {}
+        // Step 3: if the bar is hidden entirely, un-hide it (show() requires an
+        // active widget, which step 1 ensured).
+        try {
+          if (typeof bwb.isHidden === 'function' && unwrap(bwb.isHidden()) === true
+              && typeof bwb.show === 'function') bwb.show();
+        } catch(e) {}
+      }
+      // Header-button fallback in case bwb API is unavailable.
       var btn = document.querySelector('[aria-label="Pine"]')
         || document.querySelector('[data-name="pine-dialog-button"]');
       if (btn) btn.click();
     })()
   `);
+  await activate();
 
-  for (let i = 0; i < 50; i++) {
-    await new Promise(r => setTimeout(r, 200));
+  const maxIter = Math.ceil(timeoutMs / pollMs);
+  const retryAt = Math.floor(maxIter / 2);
+  let retried = false;
+
+  for (let i = 0; i < maxIter; i++) {
+    await new Promise(r => setTimeout(r, pollMs));
     const ready = await evaluate(`(function() { return ${FIND_MONACO} !== null; })()`);
     if (ready) return true;
+    if (!retried && i === retryAt) { retried = true; await activate(); }
   }
-  return false;
+
+  let stage = 'unknown';
+  try {
+    const probe = await evaluate(`
+      (function() {
+        var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
+        var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco');
+        return { panelOpen: !!(bottomArea && bottomArea.offsetHeight > 50), monacoMounted: !!monacoEl };
+      })()
+    `);
+    if (!probe?.panelOpen) stage = 'panel did not open';
+    else if (!probe?.monacoMounted) stage = 'Monaco DOM not mounted';
+    else stage = 'Monaco mounted but React fiber probe failed';
+  } catch {}
+
+  throw new Error(`Could not open Pine Editor after ${timeoutMs}ms (${stage}).`);
 }
 
 // ── Pure / offline functions ──

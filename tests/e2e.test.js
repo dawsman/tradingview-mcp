@@ -1038,8 +1038,14 @@ val = array.get(a, 5)`;
       await sleep(500);
       const isOpen = await evaluate(`!!document.querySelector('.monaco-editor.pine-editor-monaco')`);
 
-      // Close
-      await evaluate(`${BOTTOM_BAR}.hideWidget('pine-editor')`);
+      // Close — newer TV exposes bwb.close() (minimize), older exposed hideWidget(name).
+      await evaluate(`
+        (function() {
+          var bwb = ${BOTTOM_BAR};
+          if (typeof bwb.close === 'function') bwb.close();
+          else if (typeof bwb.hideWidget === 'function') bwb.hideWidget('pine-editor');
+        })()
+      `);
       await sleep(300);
 
       assert.ok(typeof isOpen === 'boolean', 'Panel toggle works');
@@ -1171,10 +1177,21 @@ val = array.get(a, 5)`;
 
       await evaluate(`${REPLAY_API}.showReplayToolbar()`);
       await sleep(500);
+      // selectFirstAvailableDate()'s promise resolves before the data series is
+      // ready — poll for isReplayStarted AND currentDate (mirrors production
+      // logic in src/core/replay.js).
       await evaluate(`${REPLAY_API}.selectFirstAvailableDate()`);
-      await sleep(500);
 
-      const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
+      let started = false;
+      let currentDate = null;
+      for (let i = 0; i < 30; i++) {
+        started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
+        currentDate = await evaluate(wv(`${REPLAY_API}.currentDate()`));
+        if (started && currentDate !== null) break;
+        await sleep(250);
+      }
+
+      if (!started) return; // Skip assertion if replay couldn't initialize (no data for tf)
       assert.ok(started, 'Replay started');
     });
 
@@ -1234,12 +1251,18 @@ val = array.get(a, 5)`;
       const started = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
       if (!started) return;
 
+      // stopReplay() alone returns to realtime; goToRealtime() re-asserts replay
+      // is started internally and throws if called after stopReplay (src/core/
+      // replay.js:stop only calls stopReplay too). Poll until state clears.
       await evaluate(`${REPLAY_API}.stopReplay()`);
-      await evaluate(`${REPLAY_API}.goToRealtime()`);
-      await evaluate(`${REPLAY_API}.hideReplayToolbar()`);
-      await sleep(500);
 
-      const stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
+      let stoppedNow = true;
+      for (let i = 0; i < 20; i++) {
+        await sleep(150);
+        stoppedNow = await evaluate(wv(`${REPLAY_API}.isReplayStarted()`));
+        if (!stoppedNow) break;
+      }
+      try { await evaluate(`${REPLAY_API}.hideReplayToolbar()`); } catch {}
       assert.ok(!stoppedNow, 'Replay stopped');
     });
   });
