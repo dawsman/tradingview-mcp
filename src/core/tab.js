@@ -4,7 +4,7 @@
  */
 import { getClient, evaluate, connectToTarget } from '../connection.js';
 
-const CDP_HOST = process.env.CDP_HOST || 'localhost';
+const CDP_HOST = process.env.CDP_HOST || '127.0.0.1';
 const CDP_PORT = parseInt(process.env.CDP_PORT || '9222', 10);
 
 /**

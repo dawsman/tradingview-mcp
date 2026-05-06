@@ -259,6 +259,12 @@ export async function scrollToDate({ date, _deps } = {}) {
         dialogOk = true;
         strategy = 'native_dialog';
       } else {
+        // Close the dialog we opened but couldn't fill, otherwise it lingers
+        // on screen and blocks Strategy B's zoom from being visible.
+        try {
+          await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+          await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+        } catch (_) {}
         strategy = 'native_dialog_fill_failed:' + (filled && filled.error || 'unknown');
       }
     } else {
