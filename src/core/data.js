@@ -173,6 +173,65 @@ const FIND_STRATEGY_SRC = `
   }
 `;
 
+// DOM-scrape fallback for strategy report (upstream #96).
+// Used when internal-API paths return empty — TV virtualizes both panels,
+// so this only scrapes currently-rendered rows.
+const DOM_SCRAPE_STRATEGY_REPORT = `
+  (function() {
+    try {
+      var lines = document.body.innerText.split('\\n').map(function(l){return l.trim();}).filter(Boolean);
+      var startIdx = lines.indexOf('Strategy Report');
+      if (startIdx < 0) return { metrics: {}, error: 'Strategy Tester panel not open (no "Strategy Report" heading found).' };
+      var window = lines.slice(startIdx, startIdx + 120);
+      function findAfter(label) {
+        var idx = window.indexOf(label);
+        if (idx < 0) return null;
+        return window.slice(idx + 1, idx + 5);
+      }
+      var stripMarks = function(s) { return (s||'').replace(/[\\u202a-\\u202e\\u2066-\\u2069\\u200e\\u200f]/g,''); };
+      var out = {};
+      ['Total P&L','Max equity drawdown','Max contracts held'].forEach(function(lbl){
+        var after = findAfter(lbl);
+        if (!after) return;
+        out[lbl] = { value: stripMarks(after[0]), unit: stripMarks(after[1]), pct: /%/.test(stripMarks(after[2])) ? stripMarks(after[2]) : null };
+      });
+      ['Total trades','Profitable trades','Profit factor'].forEach(function(lbl){
+        var after = findAfter(lbl);
+        if (!after) return;
+        var v1 = (after[0]||'').trim();
+        var v2 = (after[1]||'').trim();
+        out[lbl] = /%/.test(v1) ? { value: v1, ratio: v2 } : { value: v1 };
+      });
+      if (window[1]) out['Strategy'] = window[1];
+      if (window[2]) out['Date range'] = window[2];
+      return { metrics: out };
+    } catch (e) { return { metrics: {}, error: e.message }; }
+  })()
+`;
+
+const DOM_SCRAPE_TRADES = `
+  (function() {
+    try {
+      var rows = Array.from(document.querySelectorAll('[class*="listOfTrades"] [role="row"], [class*="strategyReport"] [role="row"], [class*="backtesting"] [role="row"]'));
+      if (rows.length === 0) {
+        var list = document.querySelectorAll('div[role="row"]');
+        if (list.length > 0) rows = Array.from(list);
+      }
+      if (rows.length === 0) return { trades: [], error: 'List of trades table not rendered — open Strategy Tester and select the "List of trades" tab.' };
+      var header = Array.from(rows[0].querySelectorAll('[role="columnheader"], [role="cell"]')).map(function(c){return (c.textContent||'').trim();});
+      var out = [];
+      for (var r = 1; r < rows.length; r++) {
+        var cells = Array.from(rows[r].querySelectorAll('[role="cell"]')).map(function(c){return (c.textContent||'').trim();});
+        if (cells.length === 0) continue;
+        var row = {};
+        for (var c = 0; c < cells.length; c++) row[header[c] || ('col_' + c)] = cells[c];
+        out.push(row);
+      }
+      return { trades: out, note: 'DOM-scrape returns only the visible (virtualized) rows. Use TV UI "Download .csv" for full history.' };
+    } catch (e) { return { trades: [], error: e.message }; }
+  })()
+`;
+
 export async function getStrategyResults() {
   // Phase 1: find strategy source and inspect its properties
   const inspection = await evaluate(`
@@ -298,7 +357,21 @@ export async function getStrategyResults() {
   }
 
   const metricCount = Object.keys(metrics).length;
-  return { success: metricCount > 0, metric_count: metricCount, source: 'internal_api', metrics, error: metricCount === 0 ? 'Strategy found but metrics extraction failed' : undefined, debug };
+  if (metricCount > 0) {
+    return { success: true, metric_count: metricCount, source: 'internal_api', metrics };
+  }
+
+  // Fallback: DOM-scrape Strategy Report (upstream #96).
+  try {
+    const dom = await evaluate(DOM_SCRAPE_STRATEGY_REPORT);
+    const domCount = Object.keys(dom?.metrics || {}).length;
+    if (domCount > 0) {
+      return { success: true, metric_count: domCount, source: 'dom_fallback', metrics: dom.metrics, debug };
+    }
+    return { success: false, metric_count: 0, source: 'dom_fallback', metrics: {}, error: dom?.error || 'Strategy found but metrics extraction failed (both API and DOM-scrape returned empty).', debug };
+  } catch (e) {
+    return { success: false, metric_count: 0, source: 'internal_api', metrics, error: 'Strategy found but metrics extraction failed; DOM-scrape also failed: ' + e.message, debug };
+  }
 }
 
 export async function getTrades({ max_trades } = {}) {
@@ -366,7 +439,22 @@ export async function getTrades({ max_trades } = {}) {
       } catch(e) { return {trades: [], source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: !trades?.error, trade_count: trades?.trades?.length || 0, total_trade_count: trades?.total_trade_count, source: trades?.source, trades: trades?.trades || [], error: trades?.error };
+  if ((trades?.trades?.length || 0) > 0) {
+    return { success: true, trade_count: trades.trades.length, source: trades.source || 'internal_api', trades: trades.trades, error: trades?.error };
+  }
+
+  // Fallback: DOM-scrape List of trades (upstream #96). Returns only visible rows.
+  try {
+    const dom = await evaluate(DOM_SCRAPE_TRADES);
+    const limit = Math.min(max_trades || 20, MAX_TRADES);
+    const rows = (dom?.trades || []).slice(0, limit);
+    if (rows.length > 0) {
+      return { success: true, trade_count: rows.length, source: 'dom_fallback', trades: rows, note: dom?.note };
+    }
+    return { success: false, trade_count: 0, source: 'dom_fallback', trades: [], error: dom?.error || trades?.error || 'No trades available from API or DOM-scrape.' };
+  } catch (e) {
+    return { success: false, trade_count: 0, source: 'internal_api', trades: [], error: (trades?.error || '') + '; DOM-scrape also failed: ' + e.message };
+  }
 }
 
 export async function getEquity() {
