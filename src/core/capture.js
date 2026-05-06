@@ -2,16 +2,23 @@
  * Core screenshot/capture logic.
  */
 import { getClient, evaluate, getChartCollection } from '../connection.js';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join, isAbsolute, resolve as pathResolve, parse as pathParse, dirname } from 'path';
 import { resolveScreenshotDir } from './paths.js';
 
-export async function captureScreenshot({ region, filename, method, output_dir } = {}) {
-  const targetDir = resolveScreenshotDir(output_dir);
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
-  const filePath = join(targetDir, `${fname}.png`);
+// Resolution order: `path` (full path, wins outright) > `output_dir` + filename > legacy SCREENSHOT_DIR (upstream #117 + our #43)
+export async function captureScreenshot({ region, filename, method, output_dir, path: outPath } = {}) {
+  let filePath;
+  if (outPath) {
+    filePath = isAbsolute(outPath) ? outPath : pathResolve(process.cwd(), outPath);
+    if (!pathParse(filePath).ext) filePath += '.png';
+    mkdirSync(dirname(filePath), { recursive: true });
+  } else {
+    const targetDir = resolveScreenshotDir(output_dir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
+    filePath = join(targetDir, `${fname}.png`);
+  }
 
   if (method === 'api') {
     try {

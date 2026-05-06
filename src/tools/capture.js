@@ -8,8 +8,9 @@ export function registerCaptureTools(server) {
     filename: z.string().optional().describe('Custom filename (without extension)'),
     method: z.string().optional().describe('Capture method: cdp (Page.captureScreenshot) or api (chartWidgetCollection.takeScreenshot) (default cdp)'),
     output_dir: z.string().optional().describe('Absolute path to save directory (default: screenshots/ in project root)'),
-  }, async ({ region, filename, method, output_dir }) => {
-    try { return jsonResult(await core.captureScreenshot({ region, filename, method, output_dir })); }
+    path: z.string().optional().describe('Optional full path (absolute or relative) for the output file. Wins over output_dir+filename if provided. Auto-appends .png if no extension.'),
+  }, async ({ region, filename, method, output_dir, path }) => {
+    try { return jsonResult(await core.captureScreenshot({ region, filename, method, output_dir, path })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
