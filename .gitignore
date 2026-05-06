@@ -17,5 +17,5 @@ logs/
 # Private strategy development
 strategies/
 
-# Private plans and docs
-docs/superpowers/
+# Private plans, specs, and research notes (kept local)
+docs/
